@@ -122,7 +122,7 @@ const DEFAULT_COURSES = [
 const GRADE_OPTIONS = ["—", "A+", "A", "A-", "B", "B-", "C", "C-", "D", "F", "S", "X"];
 
 // 2. STATE CONFIGURATION & SUPABASE INTEGRATION
-import { supabase } from './supabase.js';
+import { supabase, isSupabaseConfigured } from './supabase.js';
 
 let currentUser = null;
 let syncStatus = 'synced'; // synced, saving, offline, error
@@ -2537,6 +2537,34 @@ async function handleImportData(e) {
 
 // 10. APP ENTRYPOINT & EVENT BINDS
 function initApp() {
+  // If Supabase keys are missing, render a friendly setup guide card and exit startup
+  if (!isSupabaseConfigured) {
+    const loadingViewport = document.getElementById("loading-viewport");
+    if (loadingViewport) {
+      loadingViewport.innerHTML = `
+        <div class="loading-spinner-container" style="max-width: 480px; padding: 2.5rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--border-radius-lg); box-shadow: var(--shadow-lg);">
+          <span class="loading-icon" style="animation: none; font-size: 3rem; margin-bottom: 1rem;">⚠️</span>
+          <h3 class="loading-text" style="color: var(--clr-red-txt); font-size: 1.4rem; margin-bottom: 0.75rem;">Setup Config Required</h3>
+          <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1.5rem; line-height: 1.5;">
+            This personal OS is now configured to run in cloud mode, but your local development environment variables are not yet loaded.
+          </p>
+          <div style="text-align: left; background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 1rem; border-radius: var(--border-radius-md); font-family: monospace; font-size: 0.8rem; line-height: 1.4; margin-bottom: 1.5rem; color: var(--text-primary);">
+            # 1. Create a <strong>.env</strong> file in the root directory:<br>
+            VITE_SUPABASE_URL=https://your-project.supabase.co<br>
+            VITE_SUPABASE_ANON_KEY=your-anon-public-key-here<br><br>
+            # 2. Save the file and restart Vite: <br>
+            npm run dev
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-tertiary);">
+            Refer to the README.md for more details on Supabase and Vercel setup.
+          </p>
+        </div>
+      `;
+      loadingViewport.style.display = "flex";
+    }
+    return;
+  }
+
   // Bind Routing Event
   window.addEventListener("hashchange", handleRouting);
 

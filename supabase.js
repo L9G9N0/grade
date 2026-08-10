@@ -1,8 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Retrieve public environment variables
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Retrieve environment variables dynamically to prevent Rollup static tree-shaking
+const env = import.meta.env;
+const supabaseUrl = env['VITE_SUPABASE_URL'] || '';
+const supabaseAnonKey = env['VITE_SUPABASE_ANON_KEY'] || '';
 
-// Initialize and export Supabase client
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Verify configuration presence
+export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
+
+// Initialize client safely if configuration is present
+export const supabase = isSupabaseConfigured
+  ? createClient(supabaseUrl, supabaseAnonKey)
+  : null;
