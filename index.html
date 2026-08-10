@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Semester 5 — Academic OS</title>
+  <meta name="description" content="Central academic command center for Semester 5 at IIIT-Delhi. Track courses, marks, grades, and assessments in one clean workspace.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Mobile Navigation Toggle -->
+    <header class="mobile-header">
+      <button id="sidebar-toggle" aria-label="Toggle Sidebar" class="icon-btn">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <span class="mobile-title">Semester 5 — Academic OS</span>
+      <button id="theme-toggle-mobile" aria-label="Toggle Dark Mode" class="icon-btn">
+        <svg class="sun-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <svg class="moon-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </header>
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <div class="workspace-info">
+          <div class="workspace-icon">🎓</div>
+          <div class="workspace-text">
+            <h1 class="workspace-title">SEMESTER 5</h1>
+            <span class="workspace-subtitle">Academic OS</span>
+          </div>
+        </div>
+        <button id="theme-toggle" aria-label="Toggle Dark Mode" class="icon-btn desktop-only">
+          <svg class="sun-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg class="moon-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+      </div>
+
+      <nav class="sidebar-nav">
+        <!-- Main Dashboard Link -->
+        <a href="#dashboard" class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">🏠</span>
+          <span class="nav-label">Dashboard</span>
+        </a>
+
+        <div class="nav-section">
+          <span class="nav-section-title">CENTRAL DATABASES</span>
+          <a href="#assessments" class="nav-item" data-page="assessments">
+            <span class="nav-icon">📅</span>
+            <span class="nav-label">Assessments</span>
+          </a>
+          <a href="#marks" class="nav-item" data-page="marks">
+            <span class="nav-icon">💯</span>
+            <span class="nav-label">Marks Database</span>
+          </a>
+          <a href="#grades" class="nav-item" data-page="grades">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">Grade Tracker</span>
+          </a>
+          <a href="#progress" class="nav-item" data-page="progress">
+            <span class="nav-icon">📈</span>
+            <span class="nav-label">Progress Tracker</span>
+          </a>
+        </div>
+
+        <div class="nav-section">
+          <span class="nav-section-title">SEMESTER COURSES</span>
+          <div class="course-list" id="sidebar-course-list">
+            <!-- Dynamically populated course links -->
+          </div>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sync-status">
+          <span class="status-indicator-dot online"></span>
+          <span class="status-text">Local Storage Synced</span>
+        </div>
+        <button id="reset-data-btn" class="text-btn">Reset All Data</button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Top Breadcrumbs / Navbar -->
+      <header class="top-navbar desktop-only">
+        <div class="breadcrumbs" id="breadcrumbs">
+          <span class="breadcrumb-item">Semester 5 — Academic OS</span>
+          <span class="breadcrumb-separator">/</span>
+          <span class="breadcrumb-item active" id="current-breadcrumb">Dashboard</span>
+        </div>
+      </header>
+
+      <!-- Scrollable Content Panel -->
+      <div class="content-viewport" id="content-viewport">
+        <!-- Dynamic content is injected here by app.js -->
+      </div>
+    </main>
+  </div>
+
+  <!-- MODALS -->
+
+  <!-- Assessment Add/Edit Modal -->
+  <div class="modal-overlay" id="assessment-modal">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h3 class="modal-title" id="assessment-modal-title">Add Assessment</h3>
+        <button class="close-modal-btn" aria-label="Close modal">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <form id="assessment-form">
+        <input type="hidden" id="assessment-id">
+        
+        <div class="form-group">
+          <label for="assessment-name" class="form-label">Assessment Name *</label>
+          <input type="text" id="assessment-name" class="form-input" required placeholder="e.g. Assignment 1, Quiz 2, Midsem">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="assessment-course" class="form-label">Course *</label>
+            <select id="assessment-course" class="form-input" required>
+              <!-- Options populated dynamically -->
+            </select>
+          </div>
+          <div class="form-group col-6">
+            <label for="assessment-type" class="form-label">Type *</label>
+            <select id="assessment-type" class="form-input" required>
+              <option value="Assignment">Assignment</option>
+              <option value="Quiz">Quiz</option>
+              <option value="In-Class Exercise">In-Class Exercise</option>
+              <option value="Midsem">Midsem</option>
+              <option value="Endsem">Endsem</option>
+              <option value="Project">Project</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label for="assessment-date" class="form-label">Deadline Date *</label>
+            <input type="date" id="assessment-date" class="form-input" required>
+          </div>
+          <div class="form-group col-6">
+            <label for="assessment-priority" class="form-label">Priority</label>
+            <select id="assessment-priority" class="form-input">
+              <option value="High">🔴 High</option>
+              <option value="Medium">🟡 Medium</option>
+              <option value="Low">🔵 Low</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-4">
+            <label for="assessment-max-marks" class="form-label">Maximum Marks</label>
+            <input type="number" id="assessment-max-marks" class="form-input" min="0" step="any" placeholder="e.g. 100">
+          </div>
+          <div class="form-group col-4">
+            <label for="assessment-weightage" class="form-label">Weightage %</label>
+            <input type="number" id="assessment-weightage" class="form-input" min="0" max="100" step="any" placeholder="e.g. 15">
+          </div>
+          <div class="form-group col-4">
+            <label for="assessment-status" class="form-label">Status</label>
+            <select id="assessment-status" class="form-input">
+              <option value="Upcoming">Upcoming</option>
+              <option value="Completed">Completed</option>
+              <option value="Pending">Pending</option>
+              <option value="Not Applicable">Not Applicable</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" id="marks-obtained-group" style="display: none;">
+          <label for="assessment-marks-obtained" class="form-label">Marks Obtained</label>
+          <input type="number" id="assessment-marks-obtained" class="form-input" min="0" step="any" placeholder="Leave blank if not graded yet">
+        </div>
+
+        <div class="form-group">
+          <label for="assessment-notes" class="form-label">Notes</label>
+          <textarea id="assessment-notes" class="form-input form-textarea" placeholder="Add details, instructions, or links..."></textarea>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="save-assessment-btn">Save Assessment</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Mark Entry Modal -->
+  <div class="modal-overlay" id="mark-modal">
+    <div class="modal-container">
+      <div class="modal-header">
+        <h3 class="modal-title" id="mark-modal-title">Enter Mark</h3>
+        <button class="close-modal-btn" aria-label="Close modal">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <form id="mark-form">
+        <input type="hidden" id="mark-id">
+        
+        <div class="form-group">
+          <label for="mark-assessment-id" class="form-label">Linked Assessment *</label>
+          <select id="mark-assessment-id" class="form-input" required>
+            <!-- Dynamically populated with assessments -->
+          </select>
+          <span class="input-help-text">Selecting an assessment will auto-fill Course, Max Marks, and Weightage.</span>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label class="form-label">Course</label>
+            <input type="text" id="mark-course-display" class="form-input" disabled placeholder="Select an assessment first">
+          </div>
+          <div class="form-group col-6">
+            <label class="form-label">Type</label>
+            <input type="text" id="mark-type-display" class="form-input" disabled placeholder="Select an assessment first">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group col-6">
+            <label class="form-label">Maximum Marks</label>
+            <input type="text" id="mark-max-display" class="form-input" disabled placeholder="Select an assessment first">
+          </div>
+          <div class="form-group col-6">
+            <label class="form-label">Weightage %</label>
+            <input type="text" id="mark-weightage-display" class="form-input" disabled placeholder="Select an assessment first">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="mark-obtained" class="form-label">Marks Obtained *</label>
+          <input type="number" id="mark-obtained" class="form-input" min="0" step="any" required placeholder="e.g. 85">
+        </div>
+
+        <div class="form-group">
+          <label for="mark-notes" class="form-label">Notes</label>
+          <textarea id="mark-notes" class="form-input form-textarea" placeholder="Add specific notes about this mark..."></textarea>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary close-modal-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="save-mark-btn">Save Marks</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Load script as ES Module for dynamic rendering -->
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
