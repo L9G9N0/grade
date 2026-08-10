@@ -1,0 +1,22 @@
+{
+  "name": "Semester 5 — Academic OS",
+  "short_name": "Academic OS",
+  "description": "Central academic command center for Semester 5 at IIIT-Delhi. Track courses, marks, grades, and assessments.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2383e2",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

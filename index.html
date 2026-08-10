@@ -5,13 +5,66 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Semester 5 — Academic OS</title>
   <meta name="description" content="Central academic command center for Semester 5 at IIIT-Delhi. Track courses, marks, grades, and assessments in one clean workspace.">
+  
+  <!-- PWA & Mobile Web App Meta -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2383e2">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-  <div class="app-container">
+  <!-- LOADING SKELETON VIEWPORT -->
+  <div id="loading-viewport" class="loading-viewport">
+    <div class="loading-spinner-container">
+      <span class="loading-icon">🎓</span>
+      <h3 class="loading-text">Loading Academic OS...</h3>
+      <div class="loading-bar-wrapper">
+        <div class="loading-bar-fill"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AUTHENTICATION VIEWPORT -->
+  <div id="auth-viewport" class="auth-viewport" style="display: none;">
+    <div class="auth-card">
+      <div class="auth-header">
+        <span class="auth-icon">🎓</span>
+        <h2 class="auth-title">SEMESTER 5 — ACADEMIC OS</h2>
+        <p class="auth-subtitle">Your personal academic command center. Sign in to access your dashboard.</p>
+      </div>
+      
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login">Sign In</button>
+        <button class="auth-tab" id="tab-signup">Sign Up</button>
+      </div>
+
+      <form id="auth-form" class="auth-form">
+        <div class="form-group">
+          <label for="auth-email" class="form-label">Email Address</label>
+          <input type="email" id="auth-email" class="form-input" required placeholder="e.g. student@iiitd.ac.in">
+        </div>
+        
+        <div class="form-group">
+          <label for="auth-password" class="form-label">Password</label>
+          <input type="password" id="auth-password" class="form-input" required placeholder="••••••••" minlength="6">
+        </div>
+
+        <div id="auth-error" class="auth-error-msg" style="display: none;"></div>
+
+        <button type="submit" id="auth-submit-btn" class="btn btn-primary auth-submit-btn">
+          <span class="btn-text">Sign In</span>
+          <span class="btn-spinner" style="display: none;">⌛</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN APP CONTAINER -->
+  <div class="app-container" style="display: none;">
     <!-- Mobile Navigation Toggle -->
     <header class="mobile-header">
       <button id="sidebar-toggle" aria-label="Toggle Sidebar" class="icon-btn">
@@ -38,6 +91,23 @@
           <svg class="sun-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           <svg class="moon-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
+      </div>
+
+      <!-- User Profile Info -->
+      <div class="user-profile-block" id="user-profile-block">
+        <div class="user-avatar" id="user-avatar">U</div>
+        <div class="user-details">
+          <div class="user-email" id="user-email">loading...</div>
+        </div>
+        <button id="logout-btn" class="user-logout-btn" aria-label="Log Out" title="Sign Out">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+
+      <!-- Global Search Bar -->
+      <div class="search-container">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="global-search" class="search-input" placeholder="Search courses, tasks, notes...">
       </div>
 
       <nav class="sidebar-nav">
@@ -78,9 +148,16 @@
       <div class="sidebar-footer">
         <div class="sync-status">
           <span class="status-indicator-dot online"></span>
-          <span class="status-text">Local Storage Synced</span>
+          <span class="status-text">Loading sync...</span>
         </div>
-        <button id="reset-data-btn" class="text-btn">Reset All Data</button>
+        
+        <div class="footer-actions" style="display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.5rem; margin-bottom: 0.5rem;">
+          <button id="export-data-btn" class="text-btn" style="text-align: left; padding: 2px 0;">📤 Export Data (JSON)</button>
+          <button id="import-data-btn" class="text-btn" style="text-align: left; padding: 2px 0;">📥 Import Data (JSON)</button>
+          <input type="file" id="import-file-input" style="display: none;" accept=".json">
+        </div>
+
+        <button id="reset-data-btn" class="text-btn" style="color: var(--clr-red-txt); padding-top: 4px; border-top: 1px solid var(--border-color); width: 100%; text-align: left;">Reset All Data</button>
       </div>
     </aside>
 

@@ -2,3 +2,7 @@ node_modules/
 dist/
 .DS_Store
 build_notion_workspace.py
+generate_icons.py
+.env
+.env.local
+.env.*.local

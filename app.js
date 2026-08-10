@@ -121,11 +121,17 @@ const DEFAULT_COURSES = [
 // Grade Options for selection
 const GRADE_OPTIONS = ["—", "A+", "A", "A-", "B", "B-", "C", "C-", "D", "F", "S", "X"];
 
-// 2. STATE CONFIGURATION
+// 2. STATE CONFIGURATION & SUPABASE INTEGRATION
+import { supabase } from './supabase.js';
+
+let currentUser = null;
+let syncStatus = 'synced'; // synced, saving, offline, error
+let syncTimeout = null;
+
 let state = {
   courses: [],
   assessments: [],
-  marks: [], // Linked to assessments via assessmentId
+  marks: [],
   settings: {
     targetSemesterGPA: null,
     targetSemesterMarks: null,
@@ -135,46 +141,342 @@ let state = {
   }
 };
 
-// 3. STORAGE & STATE MANAGEMENT
-function loadState() {
-  const stored = localStorage.getItem("academic_os_state");
-  if (stored) {
-    try {
-      state = JSON.parse(stored);
-      // Backwards compatibility / Check if all courses exist
-      if (!state.courses || state.courses.length === 0) {
-        state.courses = JSON.parse(JSON.stringify(DEFAULT_COURSES));
-      } else {
-        // Ensure name overrides like Short Name are set
-        state.courses.forEach(c => {
-          if (c.code === "CSE656") c.shortName = "IIA";
-        });
-      }
-      if (!state.assessments) state.assessments = [];
-      if (!state.marks) state.marks = [];
-      if (!state.settings) {
-        state.settings = {
-          targetSemesterGPA: null,
-          targetSemesterMarks: null,
-          theme: "light",
-          calendarMonth: new Date().getMonth(),
-          calendarYear: new Date().getFullYear()
-        };
-      }
-    } catch (e) {
-      console.error("Error parsing stored state, resetting.", e);
-      resetStateToDefault();
-    }
-  } else {
-    resetStateToDefault();
-  }
-  
-  // Apply current theme
-  document.documentElement.setAttribute("data-theme", state.settings.theme || "light");
+// Database Mappings (PostgreSQL snake_case <=> Frontend camelCase)
+function mapDBToCourse(db) {
+  return {
+    id: db.id,
+    code: db.code,
+    name: db.name,
+    shortName: db.short_name,
+    credits: db.credits,
+    instructor: db.instructor || "",
+    targetGrade: db.target_grade || "—",
+    currentGrade: db.current_grade || "—",
+    targetMarks: db.target_marks,
+    syllabusProgress: db.syllabus_progress || 0,
+    status: db.status || "Not Started",
+    risk: db.risk || "Green",
+    weakAreas: db.weak_areas || "",
+    strongAreas: db.strong_areas || "",
+    notes: db.notes || ""
+  };
 }
 
-function saveState() {
-  localStorage.setItem("academic_os_state", JSON.stringify(state));
+function mapCourseToDB(js, userId) {
+  return {
+    id: js.id,
+    user_id: userId,
+    code: js.code,
+    name: js.name,
+    short_name: js.shortName,
+    credits: js.credits,
+    instructor: js.instructor || "",
+    target_grade: js.targetGrade || "—",
+    current_grade: js.currentGrade || "—",
+    target_marks: js.targetMarks,
+    syllabus_progress: js.syllabusProgress || 0,
+    status: js.status || "Not Started",
+    risk: js.risk || "Green",
+    weak_areas: js.weakAreas || "",
+    strong_areas: js.strongAreas || "",
+    notes: js.notes || ""
+  };
+}
+
+function mapDBToAssessment(db, courses) {
+  const course = courses.find(c => c.id === db.course_id);
+  return {
+    id: db.id,
+    courseId: db.course_id,
+    courseCode: course ? course.code : "",
+    name: db.name,
+    type: db.type,
+    date: db.date,
+    maxMarks: db.max_marks,
+    weightage: db.weightage || 0,
+    status: db.status || "Upcoming",
+    priority: db.priority || "Medium",
+    notes: db.notes || ""
+  };
+}
+
+function mapAssessmentToDB(js, userId, courses) {
+  const course = courses.find(c => c.code === js.courseCode);
+  return {
+    id: js.id && js.id.length > 20 ? js.id : undefined,
+    user_id: userId,
+    course_id: course ? course.id : undefined,
+    name: js.name,
+    type: js.type,
+    date: js.date,
+    max_marks: js.maxMarks,
+    weightage: js.weightage || 0,
+    status: js.status || "Upcoming",
+    priority: js.priority || "Medium",
+    notes: js.notes || ""
+  };
+}
+
+function mapDBToMark(db) {
+  return {
+    id: db.id,
+    assessmentId: db.assessment_id,
+    marksObtained: db.marks_obtained,
+    notes: db.notes || ""
+  };
+}
+
+function mapMarkToDB(js, userId) {
+  return {
+    id: js.id && js.id.length > 20 ? js.id : undefined,
+    user_id: userId,
+    assessment_id: js.assessmentId,
+    marks_obtained: js.marksObtained,
+    notes: js.notes || ""
+  };
+}
+
+// UI Status indicators
+function setSyncStatus(status) {
+  syncStatus = status;
+  const dot = document.querySelector(".status-indicator-dot");
+  const text = document.querySelector(".sync-status .status-text");
+  if (!dot || !text) return;
+
+  dot.className = "status-indicator-dot";
+  if (status === 'synced') {
+    dot.classList.add("online");
+    text.innerText = "Synced to Cloud";
+  } else if (status === 'saving') {
+    dot.classList.add("saving");
+    text.innerText = "Saving changes...";
+  } else if (status === 'offline') {
+    dot.classList.add("offline");
+    text.innerText = "Offline Cache Mode";
+  } else if (status === 'error') {
+    dot.classList.add("error");
+    text.innerText = "Sync Error (Cached)";
+  }
+}
+
+function showToast(msg) {
+  let banner = document.querySelector(".global-status-banner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.className = "global-status-banner";
+    document.body.appendChild(banner);
+  }
+  banner.innerHTML = `<span class="global-status-text">ℹ️ ${msg}</span>`;
+  banner.style.display = "flex";
+  
+  setTimeout(() => {
+    banner.style.display = "none";
+  }, 4000);
+}
+
+// 3. STORAGE & STATE MANAGEMENT
+async function fetchAllData() {
+  if (!currentUser) return;
+  
+  try {
+    setSyncStatus('saving');
+    
+    // Fetch settings
+    const { data: settingsData, error: settingsError } = await supabase
+      .from('settings')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .maybeSingle();
+      
+    if (settingsError) throw settingsError;
+    
+    if (settingsData) {
+      state.settings = {
+        targetSemesterGPA: settingsData.target_semester_gpa,
+        targetSemesterMarks: settingsData.target_semester_marks,
+        theme: settingsData.theme || 'light',
+        calendarMonth: state.settings.calendarMonth,
+        calendarYear: state.settings.calendarYear
+      };
+    } else {
+      const { error: insertError } = await supabase
+        .from('settings')
+        .insert({ user_id: currentUser.id, theme: 'light' });
+      if (insertError) throw insertError;
+    }
+    
+    // Set theme and toggle icons
+    document.documentElement.setAttribute("data-theme", state.settings.theme || "light");
+    updateThemeIcons(state.settings.theme || "light");
+
+    // Fetch courses
+    const { data: coursesData, error: coursesError } = await supabase
+      .from('courses')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('code');
+      
+    if (coursesError) throw coursesError;
+    
+    if (coursesData && coursesData.length > 0) {
+      state.courses = coursesData.map(mapDBToCourse);
+    } else {
+      const defaultCoursesPayload = DEFAULT_COURSES.map(c => mapCourseToDB(c, currentUser.id));
+      const { data: insertedCourses, error: insertCoursesError } = await supabase
+        .from('courses')
+        .insert(defaultCoursesPayload)
+        .select();
+        
+      if (insertCoursesError) throw insertCoursesError;
+      state.courses = insertedCourses.map(mapDBToCourse);
+    }
+
+    // Fetch assessments
+    const { data: assessmentsData, error: assessmentsError } = await supabase
+      .from('assessments')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('date');
+      
+    if (assessmentsError) throw assessmentsError;
+    state.assessments = assessmentsData ? assessmentsData.map(dbA => mapDBToAssessment(dbA, state.courses)) : [];
+
+    // Fetch marks
+    const { data: marksData, error: marksError } = await supabase
+      .from('marks')
+      .select('*')
+      .eq('user_id', currentUser.id);
+      
+    if (marksError) throw marksError;
+    state.marks = marksData ? marksData.map(mapDBToMark) : [];
+
+    // Cache local fallback copy
+    localStorage.setItem(`academic_os_cache_${currentUser.id}`, JSON.stringify(state));
+    
+    setSyncStatus('synced');
+    renderSidebarCourses();
+    handleRouting();
+    
+  } catch (error) {
+    console.error("Error fetching data:", error);
+    setSyncStatus('error');
+    
+    const cache = localStorage.getItem(`academic_os_cache_${currentUser.id}`);
+    if (cache) {
+      state = JSON.parse(cache);
+      renderSidebarCourses();
+      handleRouting();
+      showToast("Loaded from local offline cache.");
+    } else {
+      showToast("Could not retrieve your data. Please check your internet connection.");
+    }
+  }
+}
+
+function loadState() {
+  // Replaced by fetchAllData() session flows
+}
+
+function saveState(skipCloud = false) {
+  if (currentUser) {
+    localStorage.setItem(`academic_os_cache_${currentUser.id}`, JSON.stringify(state));
+  } else {
+    localStorage.setItem("academic_os_state", JSON.stringify(state));
+  }
+  
+  if (skipCloud || !currentUser) {
+    return;
+  }
+  
+  setSyncStatus('saving');
+  
+  if (syncTimeout) clearTimeout(syncTimeout);
+  
+  syncTimeout = setTimeout(async () => {
+    try {
+      if (!navigator.onLine) {
+        setSyncStatus('offline');
+        return;
+      }
+      
+      // 1. Sync settings
+      const settingsDB = {
+        user_id: currentUser.id,
+        target_semester_gpa: state.settings.targetSemesterGPA,
+        target_semester_marks: state.settings.targetSemesterMarks,
+        theme: state.settings.theme || 'light'
+      };
+      const { error: settingsErr } = await supabase
+        .from('settings')
+        .upsert(settingsDB);
+      if (settingsErr) throw settingsErr;
+      
+      // 2. Sync courses
+      const coursesDB = state.courses.map(c => mapCourseToDB(c, currentUser.id));
+      const { error: coursesErr } = await supabase
+        .from('courses')
+        .upsert(coursesDB);
+      if (coursesErr) throw coursesErr;
+      
+      // 3. Sync assessments (UUID generation sync loop)
+      for (let i = 0; i < state.assessments.length; i++) {
+        const a = state.assessments[i];
+        const dbA = mapAssessmentToDB(a, currentUser.id, state.courses);
+        
+        if (!a.id || a.id.length < 20) {
+          const { data, error } = await supabase
+            .from('assessments')
+            .insert(dbA)
+            .select()
+            .single();
+          if (error) throw error;
+          
+          const oldId = a.id;
+          a.id = data.id;
+          a.courseId = data.course_id;
+          
+          state.marks.forEach(m => {
+            if (m.assessmentId === oldId) {
+              m.assessmentId = data.id;
+            }
+          });
+        } else {
+          const { error } = await supabase
+            .from('assessments')
+            .upsert(dbA);
+          if (error) throw error;
+        }
+      }
+      
+      // 4. Sync marks
+      for (let i = 0; i < state.marks.length; i++) {
+        const m = state.marks[i];
+        const dbM = mapMarkToDB(m, currentUser.id);
+        
+        if (!m.id || m.id.length < 20) {
+          const { data, error } = await supabase
+            .from('marks')
+            .insert(dbM)
+            .select()
+            .single();
+          if (error) throw error;
+          m.id = data.id;
+        } else {
+          const { error } = await supabase
+            .from('marks')
+            .upsert(dbM);
+          if (error) throw error;
+        }
+      }
+      
+      localStorage.setItem(`academic_os_cache_${currentUser.id}`, JSON.stringify(state));
+      setSyncStatus('synced');
+    } catch (err) {
+      console.error("Supabase sync error:", err);
+      setSyncStatus('error');
+      showToast("Cloud sync failed. Saved to local offline cache.");
+    }
+  }, 1000);
 }
 
 function resetStateToDefault() {
@@ -188,7 +490,7 @@ function resetStateToDefault() {
     calendarMonth: new Date().getMonth(),
     calendarYear: new Date().getFullYear()
   };
-  saveState();
+  localStorage.setItem("academic_os_state", JSON.stringify(state));
 }
 
 // 4. DERIVED CALCULATIONS (FORMULAS)
@@ -251,6 +553,44 @@ function getSemesterCalculatedData() {
     averageSyllabusProgress
   };
 }
+
+// Search Filtering Helper Functions
+function getSearchFilteredCourses(list) {
+  const searchInput = document.getElementById("global-search");
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : "";
+  if (!query) return list;
+  return list.filter(c => 
+    c.code.toLowerCase().includes(query) ||
+    c.name.toLowerCase().includes(query) ||
+    (c.instructor && c.instructor.toLowerCase().includes(query)) ||
+    (c.notes && c.notes.toLowerCase().includes(query))
+  );
+}
+
+function getSearchFilteredAssessments(list) {
+  const searchInput = document.getElementById("global-search");
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : "";
+  if (!query) return list;
+  return list.filter(a => 
+    a.name.toLowerCase().includes(query) ||
+    a.courseCode.toLowerCase().includes(query) ||
+    a.type.toLowerCase().includes(query) ||
+    (a.notes && a.notes.toLowerCase().includes(query))
+  );
+}
+
+function getSearchFilteredMarks(list) {
+  const searchInput = document.getElementById("global-search");
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : "";
+  if (!query) return list;
+  return list.filter(m => {
+    const a = state.assessments.find(item => item.id === m.assessmentId);
+    return (a && a.name.toLowerCase().includes(query)) ||
+           (a && a.courseCode.toLowerCase().includes(query)) ||
+           (m.notes && m.notes.toLowerCase().includes(query));
+  });
+}
+
 
 // 5. VIEW ROUTING & BREADCRUMBS
 function handleRouting() {
@@ -464,7 +804,7 @@ function renderDashboard(container) {
 
   // Populate Dashboard Course Table
   const coursesBody = container.querySelector("#dashboard-courses-table tbody");
-  state.courses.forEach(course => {
+  getSearchFilteredCourses(state.courses).forEach(course => {
     const calc = getCourseCalculatedData(course.code);
     const progressPercent = Math.min(Math.round(calc.assessmentProgress), 100);
     
@@ -503,9 +843,9 @@ function renderDashboard(container) {
   const todayStr = new Date().toISOString().split("T")[0];
   
   // Today's deadlines
-  const todayDeadlines = state.assessments.filter(a => a.date === todayStr);
+  const todayDeadlines = getSearchFilteredAssessments(state.assessments.filter(a => a.date === todayStr));
   // High risk courses needing attention
-  const attentionCourses = state.courses.filter(c => c.risk === "Yellow" || c.risk === "Red");
+  const attentionCourses = getSearchFilteredCourses(state.courses.filter(c => c.risk === "Yellow" || c.risk === "Red"));
   
   let dailyItemsHTML = "";
   if (todayDeadlines.length === 0 && attentionCourses.length === 0) {
@@ -539,8 +879,9 @@ function renderDashboard(container) {
 
   // Populate Nearest Assessments List (Up to 5)
   const upcomingList = container.querySelector("#upcoming-assessments-list");
-  const upcomingAssessments = state.assessments
-    .filter(a => a.status === "Upcoming" || a.status === "Pending")
+  const upcomingAssessments = getSearchFilteredAssessments(
+    state.assessments.filter(a => a.status === "Upcoming" || a.status === "Pending")
+  )
     .sort((a, b) => new Date(a.date) - new Date(b.date))
     .slice(0, 5);
 
@@ -586,7 +927,7 @@ function renderDashboard(container) {
   const recentMarksList = container.querySelector("#recent-marks-list");
   
   // Sort marks by assessment date or input timestamp
-  const recentMarks = [...state.marks]
+  const recentMarks = getSearchFilteredMarks(state.marks)
     .map(m => {
       const assessment = state.assessments.find(a => a.id === m.assessmentId);
       return { mark: m, assessment: assessment };
@@ -700,8 +1041,9 @@ function renderAssessments(container) {
 }
 
 function renderAssessmentsTable(container, filteredList) {
-  if (filteredList.length === 0) {
-    container.innerHTML = `<div class="empty-db-state">No assessments in this view. Click "+ Add Assessment" to get started.</div>`;
+  const finalFiltered = getSearchFilteredAssessments(filteredList);
+  if (finalFiltered.length === 0) {
+    container.innerHTML = `<div class="empty-db-state">No matching assessments found.</div>`;
     return;
   }
 
@@ -729,7 +1071,7 @@ function renderAssessmentsTable(container, filteredList) {
   `;
 
   const tbody = container.querySelector("tbody");
-  filteredList.forEach(a => {
+  finalFiltered.forEach(a => {
     const tr = document.createElement("tr");
     
     let priorityBadge = a.priority === "High" ? `<span class="badge badge-red">🔴 High</span>` :
@@ -937,8 +1279,9 @@ function renderMarks(container) {
 
   const viewBody = container.querySelector("#marks-db-view-body");
   
-  if (state.marks.length === 0) {
-    viewBody.innerHTML = `<div class="empty-db-state">No mark records found. Select an assessment and click "+ Add Marks Entry" to fill marks.</div>`;
+  const filteredMarks = getSearchFilteredMarks(state.marks);
+  if (filteredMarks.length === 0) {
+    viewBody.innerHTML = `<div class="empty-db-state">No matching mark records found.</div>`;
     return;
   }
 
@@ -967,7 +1310,7 @@ function renderMarks(container) {
   `;
 
   const tbody = viewBody.querySelector("tbody");
-  state.marks.forEach(m => {
+  filteredMarks.forEach(m => {
     const assessment = state.assessments.find(a => a.id === m.assessmentId);
     if (!assessment) return; // Skip broken relations
 
@@ -1645,13 +1988,28 @@ function handleAssessmentSubmit(e) {
   renderSidebarCourses();
 }
 
-function deleteAssessment(id) {
+async function deleteAssessment(id) {
   state.assessments = state.assessments.filter(a => a.id !== id);
-  // Cascading delete related marks
   state.marks = state.marks.filter(m => m.assessmentId !== id);
   
-  saveState();
+  saveState(true);
   handleRouting();
+  
+  if (currentUser && id.length > 20) {
+    try {
+      setSyncStatus('saving');
+      const { error } = await supabase
+        .from('assessments')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      setSyncStatus('synced');
+    } catch (err) {
+      console.error("Database deletion error for assessment:", err);
+      setSyncStatus('error');
+      showToast("Sync deletion failed. Saved locally.");
+    }
+  }
 }
 
 // --- MARKS MODAL ---
@@ -1748,10 +2106,26 @@ function handleMarkSubmit(e) {
   handleRouting();
 }
 
-function deleteMark(id) {
+async function deleteMark(id) {
   state.marks = state.marks.filter(m => m.id !== id);
-  saveState();
+  saveState(true);
   handleRouting();
+  
+  if (currentUser && id.length > 20) {
+    try {
+      setSyncStatus('saving');
+      const { error } = await supabase
+        .from('marks')
+        .delete()
+        .eq('id', id);
+      if (error) throw error;
+      setSyncStatus('synced');
+    } catch (err) {
+      console.error("Database deletion error for mark:", err);
+      setSyncStatus('error');
+      showToast("Sync deletion failed. Saved locally.");
+    }
+  }
 }
 
 // Close all modal dialogs
@@ -1798,16 +2172,375 @@ function renderSidebarCourses() {
   });
 }
 
-// 9. INITIALIZATION & GLOBAL EVENTS
-function initApp() {
-  loadState();
-  renderSidebarCourses();
-  handleRouting();
+// 9. PRODUCTION UTILITY FUNCTIONS & INITIALIZATION
+function updateThemeIcons(theme) {
+  document.querySelectorAll(".sun-icon").forEach(icon => {
+    icon.style.display = theme === "light" ? "block" : "none";
+  });
+  document.querySelectorAll(".moon-icon").forEach(icon => {
+    icon.style.display = theme === "light" ? "none" : "block";
+  });
+}
 
-  // Route hash change listener
+function checkLocalMigration() {
+  const localData = localStorage.getItem("academic_os_state");
+  if (localData) {
+    try {
+      const parsed = JSON.parse(localData);
+      if ((parsed.assessments && parsed.assessments.length > 0) || (parsed.marks && parsed.marks.length > 0)) {
+        showMigrationBanner();
+      }
+    } catch (e) {
+      console.error("Local storage parse error on migration check:", e);
+    }
+  }
+}
+
+function showMigrationBanner() {
+  if (document.querySelector(".migration-banner")) return;
+
+  const banner = document.createElement("div");
+  banner.className = "migration-banner";
+  banner.innerHTML = `
+    <div class="migration-banner-content">
+      <span class="migration-banner-icon">💡</span>
+      <div class="migration-banner-text">
+        <h4>Migrate Local Data</h4>
+        <p>We found existing academic data stored locally in this browser. Migrate it now to back it up in your cloud profile.</p>
+      </div>
+    </div>
+    <div class="migration-actions">
+      <button class="btn btn-primary btn-sm" id="migrate-yes-btn">Migrate Data</button>
+      <button class="btn btn-secondary btn-sm" id="migrate-no-btn">Dismiss</button>
+    </div>
+  `;
+
+  const viewport = document.getElementById("content-viewport");
+  if (viewport) {
+    viewport.prepend(banner);
+    
+    document.getElementById("migrate-yes-btn").addEventListener("click", async () => {
+      await runLocalMigration();
+    });
+    
+    document.getElementById("migrate-no-btn").addEventListener("click", () => {
+      banner.remove();
+      localStorage.removeItem("academic_os_state");
+    });
+  }
+}
+
+async function runLocalMigration() {
+  const localData = localStorage.getItem("academic_os_state");
+  if (!localData || !currentUser) return;
+
+  const btn = document.getElementById("migrate-yes-btn");
+  btn.disabled = true;
+  btn.innerText = "Migrating...";
+
+  try {
+    setSyncStatus('saving');
+    const parsed = JSON.parse(localData);
+
+    const { data: dbCourses, error: coursesError } = await supabase
+      .from('courses')
+      .select('*')
+      .eq('user_id', currentUser.id);
+      
+    if (coursesError) throw coursesError;
+
+    if (parsed.settings) {
+      const { error: settingsError } = await supabase
+        .from('settings')
+        .upsert({
+          user_id: currentUser.id,
+          target_semester_gpa: parsed.settings.targetSemesterGPA,
+          target_semester_marks: parsed.settings.targetSemesterMarks,
+          theme: parsed.settings.theme || 'light'
+        });
+      if (settingsError) throw settingsError;
+    }
+
+    if (parsed.courses && parsed.courses.length > 0) {
+      for (const localC of parsed.courses) {
+        const dbC = dbCourses.find(c => c.code === localC.code);
+        if (dbC) {
+          const { error: updateError } = await supabase
+            .from('courses')
+            .update({
+              instructor: localC.instructor || "",
+              target_grade: localC.targetGrade || "—",
+              current_grade: localC.currentGrade || "—",
+              target_marks: localC.targetMarks,
+              syllabus_progress: localC.syllabusProgress || 0,
+              status: localC.status || "Not Started",
+              risk: localC.risk || "Green",
+              weak_areas: localC.weakAreas || "",
+              strong_areas: localC.strongAreas || "",
+              notes: localC.notes || ""
+            })
+            .eq('id', dbC.id);
+          if (updateError) throw updateError;
+        }
+      }
+    }
+
+    await fetchAllData();
+
+    if (parsed.assessments && parsed.assessments.length > 0) {
+      for (const localA of parsed.assessments) {
+        const dbC = state.courses.find(c => c.code === localA.courseCode);
+        if (dbC) {
+          const dbPayload = {
+            user_id: currentUser.id,
+            course_id: dbC.id,
+            name: localA.name,
+            type: localA.type,
+            date: localA.date,
+            max_marks: localA.maxMarks,
+            weightage: localA.weightage || 0,
+            status: localA.status || "Upcoming",
+            priority: localA.priority || "Medium",
+            notes: localA.notes || ""
+          };
+          
+          const { data: insertedA, error: insertAError } = await supabase
+            .from('assessments')
+            .insert(dbPayload)
+            .select()
+            .single();
+            
+          if (insertAError) throw insertAError;
+
+          const localM = parsed.marks ? parsed.marks.find(m => m.assessmentId === localA.id) : null;
+          if (localM) {
+            const markPayload = {
+              user_id: currentUser.id,
+              assessment_id: insertedA.id,
+              marks_obtained: localM.marksObtained,
+              notes: localM.notes || ""
+            };
+            const { error: insertMError } = await supabase
+              .from('marks')
+              .insert(markPayload);
+              
+            if (insertMError) throw insertMError;
+          }
+        }
+      }
+    }
+
+    await fetchAllData();
+    localStorage.removeItem("academic_os_state");
+    const banner = document.querySelector(".migration-banner");
+    if (banner) banner.remove();
+    showToast("Local data migrated successfully! Database fully synced.");
+  } catch (err) {
+    console.error("Migration error:", err);
+    setSyncStatus('error');
+    btn.disabled = false;
+    btn.innerText = "Migrate Data";
+    alert(`Migration failed: ${err.message || err}. Local data remains safe in this browser.`);
+  }
+}
+
+async function handleResetData() {
+  if (!confirm("Are you sure you want to delete all assessments, grades, and marks? This will reset the workspace back to empty placeholders.")) {
+    return;
+  }
+  
+  try {
+    setSyncStatus('saving');
+    
+    if (currentUser) {
+      const { error: assessmentsErr } = await supabase
+        .from('assessments')
+        .delete()
+        .eq('user_id', currentUser.id);
+      if (assessmentsErr) throw assessmentsErr;
+      
+      const { error: coursesDeleteErr } = await supabase
+        .from('courses')
+        .delete()
+        .eq('user_id', currentUser.id);
+      if (coursesDeleteErr) throw coursesDeleteErr;
+      
+      const defaultCoursesPayload = DEFAULT_COURSES.map(c => mapCourseToDB(c, currentUser.id));
+      const { error: coursesInsertErr } = await supabase
+        .from('courses')
+        .insert(defaultCoursesPayload);
+      if (coursesInsertErr) throw coursesInsertErr;
+      
+      const { error: settingsErr } = await supabase
+        .from('settings')
+        .update({ target_semester_gpa: null, target_semester_marks: null })
+        .eq('user_id', currentUser.id);
+      if (settingsErr) throw settingsErr;
+    }
+    
+    resetStateToDefault();
+    
+    if (currentUser) {
+      await fetchAllData();
+    } else {
+      renderSidebarCourses();
+      handleRouting();
+    }
+    showToast("Data reset to defaults successfully.");
+  } catch (err) {
+    console.error("Reset data error:", err);
+    setSyncStatus('error');
+    showToast("Reset failed. Please check your network connection.");
+  }
+}
+
+function handleExportData() {
+  try {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `academic_os_backup_${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    showToast("Data exported successfully!");
+  } catch (err) {
+    console.error("Export error:", err);
+    alert("Could not export data: " + err.message);
+  }
+}
+
+async function handleImportData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async (event) => {
+    try {
+      const imported = JSON.parse(event.target.result);
+      
+      if (!imported || typeof imported !== 'object') throw new Error("Invalid file format: must be an object.");
+      if (!Array.isArray(imported.courses)) throw new Error("Missing courses list.");
+      if (!Array.isArray(imported.assessments)) throw new Error("Missing assessments list.");
+      if (!Array.isArray(imported.marks)) throw new Error("Missing marks list.");
+      
+      if (!confirm("⚠️ WARNING: This will replace all your current courses, assessments, and marks with the data from the imported backup file. This action cannot be undone. Are you sure you want to proceed?")) {
+        e.target.value = "";
+        return;
+      }
+
+      setSyncStatus('saving');
+
+      if (currentUser) {
+        // Clear database
+        const { error: assessmentsErr } = await supabase
+          .from('assessments')
+          .delete()
+          .eq('user_id', currentUser.id);
+        if (assessmentsErr) throw assessmentsErr;
+
+        const { error: coursesDeleteErr } = await supabase
+          .from('courses')
+          .delete()
+          .eq('user_id', currentUser.id);
+        if (coursesDeleteErr) throw coursesDeleteErr;
+
+        // Insert courses
+        const coursesPayload = imported.courses.map(c => mapCourseToDB(c, currentUser.id));
+        const { data: insertedCourses, error: coursesInsertErr } = await supabase
+          .from('courses')
+          .insert(coursesPayload)
+          .select();
+        if (coursesInsertErr) throw coursesInsertErr;
+
+        state.courses = insertedCourses.map(mapDBToCourse);
+
+        // Insert assessments and resolve references
+        if (imported.assessments.length > 0) {
+          for (const localA of imported.assessments) {
+            const dbC = state.courses.find(c => c.code === localA.courseCode);
+            if (dbC) {
+              const dbPayload = {
+                user_id: currentUser.id,
+                course_id: dbC.id,
+                name: localA.name,
+                type: localA.type,
+                date: localA.date,
+                max_marks: localA.maxMarks,
+                weightage: localA.weightage || 0,
+                status: localA.status || "Upcoming",
+                priority: localA.priority || "Medium",
+                notes: localA.notes || ""
+              };
+              
+              const { data: insertedA, error: insertAError } = await supabase
+                .from('assessments')
+                .insert(dbPayload)
+                .select()
+                .single();
+                
+              if (insertAError) throw insertAError;
+
+              const localM = imported.marks.find(m => m.assessmentId === localA.id);
+              if (localM) {
+                const markPayload = {
+                  user_id: currentUser.id,
+                  assessment_id: insertedA.id,
+                  marks_obtained: localM.marksObtained,
+                  notes: localM.notes || ""
+                };
+                const { error: insertMError } = await supabase
+                  .from('marks')
+                  .insert(markPayload);
+                  
+                if (insertMError) throw insertMError;
+              }
+            }
+          }
+        }
+
+        // Overwrite settings
+        if (imported.settings) {
+          const { error: settingsErr } = await supabase
+            .from('settings')
+            .upsert({
+              user_id: currentUser.id,
+              target_semester_gpa: imported.settings.targetSemesterGPA,
+              target_semester_marks: imported.settings.targetSemesterMarks,
+              theme: imported.settings.theme || 'light'
+            });
+          if (settingsErr) throw settingsErr;
+        }
+
+        await fetchAllData();
+      } else {
+        state.courses = imported.courses;
+        state.assessments = imported.assessments;
+        state.marks = imported.marks;
+        if (imported.settings) state.settings = imported.settings;
+        saveState();
+        renderSidebarCourses();
+        handleRouting();
+      }
+
+      showToast("Data imported and synced successfully!");
+    } catch (err) {
+      console.error("Import error:", err);
+      setSyncStatus('error');
+      alert("Import failed: " + (err.message || err));
+    } finally {
+      e.target.value = "";
+    }
+  };
+  reader.readAsText(file);
+}
+
+// 10. APP ENTRYPOINT & EVENT BINDS
+function initApp() {
+  // Bind Routing Event
   window.addEventListener("hashchange", handleRouting);
 
-  // Sidebar toggle for mobile
+  // Sidebar toggle for mobile drawer navigation
   const sidebarToggle = document.getElementById("sidebar-toggle");
   const sidebar = document.getElementById("sidebar");
   if (sidebarToggle) {
@@ -1821,7 +2554,6 @@ function initApp() {
     btn.addEventListener("click", closeModals);
   });
   
-  // Also close modal by clicking overlay background
   document.querySelectorAll(".modal-overlay").forEach(overlay => {
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) closeModals();
@@ -1843,38 +2575,154 @@ function initApp() {
     saveState();
     
     document.documentElement.setAttribute("data-theme", newTheme);
-    
-    // Toggle icon displays
-    document.querySelectorAll(".sun-icon").forEach(icon => {
-      icon.style.display = newTheme === "light" ? "block" : "none";
-    });
-    document.querySelectorAll(".moon-icon").forEach(icon => {
-      icon.style.display = newTheme === "light" ? "none" : "block";
-    });
+    updateThemeIcons(newTheme);
   }
 
   if (themeToggle) themeToggle.addEventListener("click", toggleTheme);
   if (themeToggleMobile) themeToggleMobile.addEventListener("click", toggleTheme);
 
-  // Init theme icons display state
-  const curTheme = state.settings.theme || "light";
-  document.querySelectorAll(".sun-icon").forEach(icon => {
-    icon.style.display = curTheme === "light" ? "block" : "none";
-  });
-  document.querySelectorAll(".moon-icon").forEach(icon => {
-    icon.style.display = curTheme === "light" ? "none" : "block";
-  });
-
   // Reset Data Button
   const resetBtn = document.getElementById("reset-data-btn");
   if (resetBtn) {
-    resetBtn.addEventListener("click", () => {
-      if (confirm("Are you sure you want to delete all assessments, grades, and marks? This will reset the workspace back to empty placeholders.")) {
-        resetStateToDefault();
-        loadState();
-        renderSidebarCourses();
-        handleRouting();
+    resetBtn.addEventListener("click", handleResetData);
+  }
+
+  // Export Data Button
+  const exportBtn = document.getElementById("export-data-btn");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", handleExportData);
+  }
+
+  // Import Data Buttons
+  const importBtn = document.getElementById("import-data-btn");
+  const fileInput = document.getElementById("import-file-input");
+  if (importBtn && fileInput) {
+    importBtn.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", handleImportData);
+  }
+
+  // Network connection auto-sync listeners
+  window.addEventListener('online', () => {
+    if (currentUser) {
+      fetchAllData();
+    } else {
+      setSyncStatus('synced');
+    }
+  });
+  window.addEventListener('offline', () => {
+    setSyncStatus('offline');
+  });
+
+  // Global Search input bind
+  const globalSearch = document.getElementById("global-search");
+  if (globalSearch) {
+    globalSearch.addEventListener("input", () => {
+      handleRouting();
+    });
+  }
+
+  // AUTHENTICATION SYSTEM LOGIC
+  const tabLogin = document.getElementById("tab-login");
+  const tabSignup = document.getElementById("tab-signup");
+  const authForm = document.getElementById("auth-form");
+  const submitBtn = document.getElementById("auth-submit-btn");
+  const submitText = submitBtn.querySelector(".btn-text");
+  const errorMsg = document.getElementById("auth-error");
+  const logoutBtn = document.getElementById("logout-btn");
+  
+  let activeAuthTab = 'login';
+
+  tabLogin.addEventListener("click", () => {
+    activeAuthTab = 'login';
+    tabLogin.classList.add("active");
+    tabSignup.classList.remove("active");
+    submitText.innerText = "Sign In";
+    errorMsg.style.display = "none";
+  });
+
+  tabSignup.addEventListener("click", () => {
+    activeAuthTab = 'signup';
+    tabSignup.classList.add("active");
+    tabLogin.classList.remove("active");
+    submitText.innerText = "Sign Up";
+    errorMsg.style.display = "none";
+  });
+
+  authForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = document.getElementById("auth-email").value.trim();
+    const password = document.getElementById("auth-password").value;
+    const spinner = submitBtn.querySelector(".btn-spinner");
+
+    errorMsg.style.display = "none";
+    submitBtn.disabled = true;
+    spinner.style.display = "inline-block";
+
+    try {
+      if (activeAuthTab === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        showToast("Signup successful! Please log in.");
+        tabLogin.click();
       }
+    } catch (err) {
+      console.error("Authentication error:", err);
+      errorMsg.innerText = err.message || "An authentication error occurred. Please check your credentials.";
+      errorMsg.style.display = "block";
+    } finally {
+      submitBtn.disabled = false;
+      spinner.style.display = "none";
+    }
+  });
+
+  if (logoutBtn) {
+    logoutBtn.addEventListener("click", async () => {
+      if (confirm("Are you sure you want to sign out?")) {
+        await supabase.auth.signOut();
+      }
+    });
+  }
+
+  // Manage viewport toggle visibilities with Supabase session status
+  const loadingViewport = document.getElementById("loading-viewport");
+  const authViewport = document.getElementById("auth-viewport");
+  const appContainer = document.querySelector(".app-container");
+
+  supabase.auth.onAuthStateChange(async (event, session) => {
+    if (session) {
+      currentUser = session.user;
+      
+      // Update UI Header user block details
+      document.getElementById("user-email").innerText = currentUser.email;
+      document.getElementById("user-avatar").innerText = currentUser.email[0].toUpperCase();
+      document.getElementById("user-profile-block").style.display = "flex";
+
+      // Fetch cloud data and sync UI
+      await fetchAllData();
+      
+      // Toggle views
+      loadingViewport.style.display = "none";
+      authViewport.style.display = "none";
+      appContainer.style.display = "flex";
+    } else {
+      currentUser = null;
+      resetStateToDefault();
+      
+      loadingViewport.style.display = "none";
+      authViewport.style.display = "flex";
+      appContainer.style.display = "none";
+    }
+  });
+
+  // PWA Service Worker Registration
+  if ('serviceWorker' in navigator && !window.location.hostname.includes('localhost')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(err => {
+        console.warn('PWA Service Worker registration failed:', err);
+      });
     });
   }
 }
