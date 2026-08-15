@@ -69,9 +69,9 @@ const DEFAULT_COURSES = [
     notes: ""
   },
   {
-    code: "CSE656",
-    name: "Information Integration and Applications",
-    shortName: "IIA",
+    code: "BTP498",
+    name: "B.Tech Project",
+    shortName: "BTP",
     credits: 4,
     instructor: "",
     targetGrade: "—",
