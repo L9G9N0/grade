@@ -169,7 +169,7 @@ begin
     (new.id, 'COM301A', 'Technical Communication', 'COM301A', 2, 'Not Started', 'Green'),
     (new.id, 'CSE232', 'Computer Networks', 'CSE232', 4, 'Not Started', 'Green'),
     (new.id, 'CSE343', 'Machine Learning', 'CSE343', 4, 'Not Started', 'Green'),
-    (new.id, 'CSE656', 'Information Integration and Applications', 'IIA', 4, 'Not Started', 'Green'),
+    (new.id, 'CSE656', 'B.Tech Project', 'BTP', 4, 'Not Started', 'Green'),
     (new.id, 'CSE999A', 'Distance Course in CSE', 'CSE999A', 4, 'Not Started', 'Green'),
     (new.id, 'ESC205A', 'Environmental Sciences', 'ESC205A', 2, 'Not Started', 'Green');
     
